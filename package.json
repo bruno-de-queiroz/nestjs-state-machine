@@ -1,5 +1,5 @@
 {
-  "name": "state-machine",
+  "name": "nestjs-state-machine",
   "files": [
     "dist/*.js",
     "dist/*.js.map",
