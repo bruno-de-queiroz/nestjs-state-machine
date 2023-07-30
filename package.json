@@ -34,8 +34,7 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --ci --coverage",
     "test:ci": "jest --ci --coverage --json --testLocationInResults --outputFile=coverage/report.json",
-    "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "prepare": "husky install"
+    "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand"
   },
   "dependencies": {
     "@nestjs/common": "^10.1.2",
