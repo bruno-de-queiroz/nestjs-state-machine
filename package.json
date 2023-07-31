@@ -1,6 +1,6 @@
 {
   "name": "nestjs-state-machine",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A module to manage a state-machine.",
   "files": [
     "dist/*.js",
