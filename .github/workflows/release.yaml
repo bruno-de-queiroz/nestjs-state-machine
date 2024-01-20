@@ -1,12 +1,14 @@
 name: Release
 
 on:
+  workflow_dispatch:
   push:
     branches: [ 'main' ]
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    if: ${{ github.actor != 'dependabot[bot]' && !contains(github.event.head_commit.message, '[skip ci]') && !startsWith(github.event.head_commit.message, 'chore') }}}}
     permissions:
       contents: write
       issues: write
@@ -16,7 +18,7 @@ jobs:
       - uses: actions/checkout@v3
       - uses: actions/setup-node@v3
         with:
-          node-version: 18.x
+          node-version: 20.x
           cache: 'npm'
       - run: npm ci
       - run: npm run test:ci
