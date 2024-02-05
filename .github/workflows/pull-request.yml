@@ -38,13 +38,11 @@ jobs:
       - name: Echo compatibility score
         run: echo ${{ steps.metadata.outputs.compatibility-score }}
       - name: Approve a PR
-        if: ${{ steps.metadata.outputs.compatibility-score >= 90 }}
         run: gh pr review --approve "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Enable auto-merge for Dependabot PRs
-        if: ${{ steps.metadata.outputs.compatibility-score >= 90 }}
         run: gh pr merge --auto --rebase "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
