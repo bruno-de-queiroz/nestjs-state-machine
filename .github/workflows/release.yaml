@@ -24,7 +24,7 @@ jobs:
       - run: npm run test:ci
       - run: npm run build
       - run: npm i -g semantic-release @semantic-release/npm @semantic-release/git @semantic-release/github
-      - uses: webfactory/ssh-agent@v0.9.0
+      - uses: webfactory/ssh-agent@v0.9.1
         with:
           ssh-private-key: ${{ secrets.DEPLOY_KEY_SECRET }}
       - name: Release
