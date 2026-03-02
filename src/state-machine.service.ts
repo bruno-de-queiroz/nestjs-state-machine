@@ -11,7 +11,6 @@ import {
 import { Injectable } from '@nestjs/common';
 import { CanTransition } from './can-transition.interface';
 import { asTransition, Transition } from './transition.type';
-import { isDefined } from 'class-validator';
 import { StateMachineGraph } from './state-machine-graph.model';
 import { EntityInFinalStateError } from './entity-in-final-state.error';
 import { or } from './rx-extensions/or';
@@ -54,7 +53,7 @@ export class StateMachineService<T, U extends keyof T> {
             .pipe(
               mergeMap((guard) =>
                 or(
-                  isDefined(guard),
+                  guard != null,
                   () => guard.canTransition(input),
                   () => of(input),
                 ).pipe(map((it) => Object.assign(it, { [this.field]: b }))),

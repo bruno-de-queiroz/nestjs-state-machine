@@ -12,7 +12,6 @@ import {
 import { Injectable } from '@nestjs/common';
 import { CanTransition } from './can-transition.interface';
 import { asTransition, Transition } from './transition.type';
-import { isDefined } from 'class-validator';
 import { StateMachineGraph } from './state-machine-graph.model';
 import { EntityInFinalStateError } from './entity-in-final-state.error';
 import { or } from './rx-extensions/or';

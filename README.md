@@ -1,156 +1,152 @@
-# StateMachineModule 
+# nestjs-state-machine
 
-A simple module to manage a state-machine in a more nestjsish way
+Declarative state machine module for NestJS with transition guards, automatic path finding, and full DI support.
 
-## Requirements
-
-* Node.js (https://nodejs.dev/en/learn/how-to-install-nodejs/)
-
-
-## Installation
 ```bash
-$ npm i --save bruno-de-queiroz/nestjs-state-machine
+npm i nestjs-state-machine
 ```
 
-## Usage
+## Features
 
-Considering this example:
+- **Declarative graph** — define states and transitions as a tree, the module builds the adjacency map
+- **Transition guards** — injectable classes that approve or reject transitions via RxJS Observables
+- **Auto path finding** — BFS shortest path between any two states, calling guards along the way
+- **Manual transitions** — mark states that can only be reached explicitly (e.g. `cancelled`, `failed`)
+- **Strict mode** — throw when no transition path exists, or silently return the entity
+- **ASCII diagrams** — `graph.diagram()` prints the full state tree for debugging
+- **Type-safe** — generic over entity type and status field, compile-time state validation
+
+## Quick start
+
 ```typescript
-class TestEntity {
-  status:
-    | 'pending'
-    | 'processed'
-    | 'synchronized'
-    | 'fulfilled'
-    | 'failed'
-    | 'cancelled';
+import { StateMachineModule, TransitionGuard, CanTransition, StateMachineService } from 'nestjs-state-machine';
+
+// 1. Define your entity
+class Order {
+  status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
 }
-```
-### Initialization
 
-```typescript
-StateMachineModule.forFeature({
-    entity: TestEntity,
-    field: 'status',
-    graph: {
-      root: {
-        state: 'pending',
-        next: [
-          {
-            state: 'processed',
-            next: [
-              {
-                state: 'synchronized',
-                next: [
-                  'fulfilled',
-                  {
-                    state: 'failed',
-                    next: 'fulfilled',
-                  },
-                  'cancelled',
-                ],
-              },
-              'cancelled',
-            ],
-          },
-          'cancelled',
-        ],
+// 2. Register the module
+@Module({
+  imports: [
+    StateMachineModule.forFeature({
+      entity: Order,
+      field: 'status',
+      graph: {
+        root: {
+          state: 'pending',
+          next: [
+            {
+              state: 'processing',
+              next: [
+                { state: 'shipped', next: 'delivered' },
+                'cancelled',
+              ],
+            },
+            'cancelled',
+          ],
+        },
+        manual: ['cancelled'],
+        strict: true,
       },
-      manual: ['cancelled', 'failed'],
-      strict: true,
-    },
-    guards: [
-      TestTransitionWithInjected,
-    ],
+      guards: [ValidatePayment],
+    }),
+  ],
 })
+export class OrderModule {}
 ```
 
-### Transition guard declaration
-```typescript
-@TransitionGuard<TestEntity, 'status'>('processed', 'synchronized')
-class TestTransitionWithInjected implements CanTransition<TestEntity> {
-  constructor(private readonly service: Service) {}
+## Transition guards
 
-  canTransition(input: TestEntity): Observable<TestEntity> {
-    return of(input)
-            .pipe(filter(() => this.service.validate()))
-            .pipe(map(() => input));
+Guards are injectable classes decorated with `@TransitionGuard`. They run automatically when traversing their specific transition.
+
+```typescript
+@TransitionGuard<Order, 'status'>('pending', 'processing')
+class ValidatePayment implements CanTransition<Order> {
+  constructor(private readonly payments: PaymentService) {}
+
+  canTransition(order: Order): Observable<Order> {
+    return from(this.payments.verify(order)).pipe(
+      map(() => order),
+    );
   }
 }
 ```
 
-### Service injection
+Guards receive full NestJS dependency injection. If a guard throws or the Observable errors, the transition is rejected.
+
+## Service API
+
+Inject `StateMachineService<T, U>` where `T` is your entity and `U` is the status field key.
 
 ```typescript
-import { Injectable } from '@nestjs/common';
-
 @Injectable()
-class MyService {
-  constructor(private readonly stateMachine: StateMachineService<TestEntity, 'status'>) {}
+class OrderService {
+  constructor(
+    private readonly stateMachine: StateMachineService<Order, 'status'>,
+  ) {}
 }
 ```
 
-#### Service methods
+### `transition(entity: T, to: T[U]): Observable<T>`
 
-##### `transition(input: T, to: T[U]): Observable<T>`
-This method will make all the transitions till the targeted state calling the registered guards for each transition, and returns the entity as `Observable<T>`.
+Finds the shortest path from the current state to the target state and executes all transitions in sequence, calling guards for each step.
 
 ```typescript
-this.stateMachie.transition(new TestEntity(), 'fulfilled')
-        .subscribe(data => expect(data.status).toBe('fulfilled'));
+this.stateMachine.transition(order, 'delivered')
+  .subscribe(result => console.log(result.status)); // 'delivered'
 ```
 
-##### `next(input: T): Observable<T>`
-This method will call the next transition that is not manual and returns the entity as `Observable<T>`. The order in the `next` field of the graph declaration is preserved. 
+### `next(entity: T): Observable<T>`
+
+Moves the entity to the next non-manual state. Follows declaration order in the `next` array.
 
 ```typescript
-StateMachineModule.forFeature({
-  entity: TestEntity,
-  field: 'status',
-  graph: {
-    root: {
-      state: 'pending',
-      next: [
-        { state: 'processed', next: 'fulfilled' },
-        'synchronized',
-        'cancelled',
-      ],
-    },
-    manual: ['cancelled'],
-    strict: true,
-  },
-  guards: [
-    TestTransitionWithInjected,
+this.stateMachine.next(order)
+  .subscribe(result => console.log(result.status)); // 'processing'
+```
+
+Throws `EntityInFinalStateError` if no further non-manual transitions exist.
+
+## Graph options
+
+```typescript
+interface StateMachineGraphOptions<T, U extends keyof T> {
+  root: StateMachineNode<T, U>;  // State tree definition
+  manual?: T[U][];               // States only reachable via explicit transition()
+  strict?: boolean;              // Throw NoTransitionFoundError when no path exists (default: false)
+}
+```
+
+### State nodes
+
+States can be defined as strings (leaf nodes) or objects (with children):
+
+```typescript
+{
+  state: 'processing',
+  next: [
+    { state: 'shipped', next: 'delivered' },  // object node with child
+    'cancelled',                                // string leaf node
   ],
-})
-
-// ...
-this.stateMachie.next(new TestEntity({ status: 'pending' }))
-  .subscribe(data => expect(data.status).toBe('processed'));
-
-// ...
-this.stateMachie.next(new TestEntity({ status: 'processed' }))
-  .subscribe(data => expect(data.status).toBe('fulfilled'));
+}
 ```
 
-## Test
+### Diagram
 
-```bash
-# tests
-$ npm run test
+Call `graph.diagram()` to visualize the state tree:
 
-# test coverage
-$ npm run test:cov
+```
+└─pending
+  ├─processing
+  │ ├─shipped
+  │ │ └─delivered
+  │ └─cancelled(*)
+  └─cancelled(*)
+
+(*) Only manual transitions
 ```
 
-### Commit convention
+## License
 
-See https://www.conventionalcommits.org/en/v1.0.0/#summary
-
-### Versioning
-
-See https://semver.org/
-
-### Auto-versioning based on commit messages
-
-See https://github.com/semantic-release/semantic-release
+MIT

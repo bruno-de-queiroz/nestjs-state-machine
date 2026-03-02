@@ -1,5 +1,4 @@
-import { Observable, of } from 'rxjs';
-import { OperatorFunction } from 'rxjs/internal/types';
+import { Observable, of, OperatorFunction } from 'rxjs';
 
 export const or = <T>(
   condition: boolean,
