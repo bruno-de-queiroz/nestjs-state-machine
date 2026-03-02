@@ -166,6 +166,268 @@ Call `graph.diagram()` to visualize the state tree:
 (*) Only manual transitions
 ```
 
+## Examples
+
+### Pull Request workflow
+
+CI must pass before merging, reviewers can request changes, and anyone can close at any time.
+
+```typescript
+class PullRequest {
+  status: 'draft' | 'open' | 'review' | 'changes_requested' | 'approved' | 'merged' | 'closed';
+}
+
+// CI pipeline guard — blocks merge if checks fail
+@TransitionGuard<PullRequest, 'status'>('approved', 'merged')
+class CiMustPass implements CanTransition<PullRequest> {
+  constructor(private readonly ci: CiService) {}
+
+  canTransition(pr: PullRequest): Observable<PullRequest> {
+    return from(this.ci.getStatus(pr)).pipe(
+      map(status => {
+        if (status !== 'green') throw new Error('CI checks have not passed');
+        return pr;
+      }),
+    );
+  }
+}
+
+// Notify author when changes are requested
+@TransitionGuard<PullRequest, 'status'>('review', 'changes_requested')
+class NotifyAuthor implements CanTransition<PullRequest> {
+  constructor(private readonly notifications: NotificationService) {}
+
+  canTransition(pr: PullRequest): Observable<PullRequest> {
+    return from(this.notifications.send(pr, 'Changes requested')).pipe(map(() => pr));
+  }
+}
+
+StateMachineModule.forFeature({
+  entity: PullRequest,
+  field: 'status',
+  graph: {
+    root: {
+      state: 'draft',
+      next: {
+        state: 'open',
+        next: [
+          {
+            state: 'review',
+            next: [
+              {
+                state: 'changes_requested',
+                next: 'review',  // back to review after fixes
+              },
+              { state: 'approved', next: 'merged' },
+            ],
+          },
+          'closed',
+        ],
+      },
+    },
+    manual: ['closed'],
+    strict: true,
+  },
+  guards: [CiMustPass, NotifyAuthor],
+})
+```
+
+```
+└─draft
+  └─open
+    ├─review
+    │ ├─changes_requested
+    │ │ └─review
+    │ └─approved
+    │   └─merged
+    └─closed(*)
+```
+
+```typescript
+// Auto-advance: draft → open → review
+stateMachine.transition(pr, 'review').subscribe();
+
+// Reviewer requests changes: review → changes_requested
+stateMachine.transition(pr, 'changes_requested').subscribe();
+
+// Author pushes fixes, back to review, then all the way to merged
+stateMachine.transition(pr, 'merged').subscribe();
+// Calls: changes_requested → review → approved → merged (CI guard fires on approved→merged)
+```
+
+---
+
+### Super Mario power-ups
+
+Classic power-up chain with a guard that checks if Mario has a mushroom before getting fire flower.
+
+```typescript
+class Mario {
+  power: 'small' | 'big' | 'fire' | 'star' | 'dead';
+}
+
+@TransitionGuard<Mario, 'power'>('big', 'fire')
+class RequiresMushroom implements CanTransition<Mario> {
+  constructor(private readonly inventory: InventoryService) {}
+
+  canTransition(mario: Mario): Observable<Mario> {
+    return from(this.inventory.has(mario, 'fire-flower')).pipe(
+      map(has => {
+        if (!has) throw new Error('Need a fire flower!');
+        return mario;
+      }),
+    );
+  }
+}
+
+StateMachineModule.forFeature({
+  entity: Mario,
+  field: 'power',
+  graph: {
+    root: {
+      state: 'small',
+      next: [
+        {
+          state: 'big',
+          next: [
+            { state: 'fire', next: 'star' },
+            'star',
+          ],
+        },
+        'star',
+        'dead',
+      ],
+    },
+    manual: ['dead'],
+    strict: true,
+  },
+  guards: [RequiresMushroom],
+})
+```
+
+```
+└─small
+  ├─big
+  │ ├─fire
+  │ │ └─star
+  │ └─star
+  ├─star
+  └─dead(*)
+```
+
+```typescript
+// Power up: small → big → fire (guard checks for fire flower)
+stateMachine.transition(mario, 'fire').subscribe();
+
+// Get star from any state
+stateMachine.transition(mario, 'star').subscribe();
+
+// Automatic next power-up (skips dead since it's manual)
+stateMachine.next(mario).subscribe(); // small → big
+```
+
+---
+
+### Job interview pipeline
+
+Multi-stage hiring process with automatic rejections and offer approval guards.
+
+```typescript
+class Candidate {
+  stage: 'applied' | 'screening' | 'phone' | 'onsite' | 'offer' | 'hired' | 'rejected';
+}
+
+@TransitionGuard<Candidate, 'stage'>('onsite', 'offer')
+class BudgetApproval implements CanTransition<Candidate> {
+  constructor(
+    private readonly budget: BudgetService,
+    private readonly salary: SalaryService,
+  ) {}
+
+  canTransition(candidate: Candidate): Observable<Candidate> {
+    return from(this.salary.calculate(candidate)).pipe(
+      mergeMap(amount => this.budget.approve(amount)),
+      map(() => candidate),
+    );
+  }
+}
+
+@TransitionGuard<Candidate, 'stage'>('offer', 'hired')
+class BackgroundCheck implements CanTransition<Candidate> {
+  constructor(private readonly checks: BackgroundCheckService) {}
+
+  canTransition(candidate: Candidate): Observable<Candidate> {
+    return from(this.checks.run(candidate)).pipe(
+      map(result => {
+        if (!result.passed) throw new Error('Background check failed');
+        return candidate;
+      }),
+    );
+  }
+}
+
+StateMachineModule.forFeature({
+  entity: Candidate,
+  field: 'stage',
+  graph: {
+    root: {
+      state: 'applied',
+      next: [
+        {
+          state: 'screening',
+          next: [
+            {
+              state: 'phone',
+              next: [
+                {
+                  state: 'onsite',
+                  next: [
+                    { state: 'offer', next: 'hired' },
+                    'rejected',
+                  ],
+                },
+                'rejected',
+              ],
+            },
+            'rejected',
+          ],
+        },
+        'rejected',
+      ],
+    },
+    manual: ['rejected'],
+    strict: true,
+  },
+  guards: [BudgetApproval, BackgroundCheck],
+})
+```
+
+```
+└─applied
+  ├─screening
+  │ ├─phone
+  │ │ ├─onsite
+  │ │ │ ├─offer
+  │ │ │ │ └─hired
+  │ │ │ └─rejected(*)
+  │ │ └─rejected(*)
+  │ └─rejected(*)
+  └─rejected(*)
+```
+
+```typescript
+// Fast-track: applied → screening → phone → onsite → offer → hired
+// BudgetApproval fires on onsite→offer, BackgroundCheck fires on offer→hired
+stateMachine.transition(candidate, 'hired').subscribe();
+
+// Reject at any stage
+stateMachine.transition(candidate, 'rejected').subscribe();
+
+// Step-by-step advancement
+stateMachine.next(candidate).subscribe(); // applied → screening
+stateMachine.next(candidate).subscribe(); // screening → phone
+```
+
 ## License
 
 MIT
