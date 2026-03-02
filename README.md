@@ -56,6 +56,25 @@ class Order {
 export class OrderModule {}
 ```
 
+## Async configuration
+
+Use `forFeatureAsync` when the graph comes from `ConfigService` or any other injected provider:
+
+```typescript
+StateMachineModule.forFeatureAsync({
+  entity: Order,
+  field: 'status',
+  guards: [ValidatePayment],
+  imports: [ConfigModule],
+  inject: [ConfigService],
+  useFactory: (config: ConfigService) => ({
+    root: config.get('orderGraph'),
+    manual: config.get('manualStates'),
+    strict: true,
+  }),
+})
+```
+
 ## Transition guards
 
 Guards are injectable classes decorated with `@TransitionGuard`. They run automatically when traversing their specific transition.

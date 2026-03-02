@@ -1,12 +1,15 @@
-import { Global, INestApplication, Injectable, Module } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import { Global, Injectable, Module } from '@nestjs/common';
+import { Test, TestingModule } from '@nestjs/testing';
 import { StateMachineModule } from './state-machine.module';
 import { StateMachineService } from './state-machine.service';
 import { TransitionGuard } from './transition-guard.decorator';
 import { CanTransition } from './can-transition.interface';
 import { filter, map, Observable, of, throwError } from 'rxjs';
 import { catchError } from 'rxjs/operators';
-import { StateMachineNode } from './state-machine-graph.model';
+import {
+  StateMachineGraphOptions,
+  StateMachineNode,
+} from './state-machine-graph.model';
 
 class TestEntity {
   status:
@@ -90,10 +93,10 @@ class TestTransitionWithInjected implements CanTransition<TestEntity> {
 
 describe('StateMachineModule', () => {
   jest.setTimeout(3000);
-  let app: INestApplication;
+  let module: TestingModule;
 
   beforeAll(async () => {
-    const moduleFixture = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       imports: [
         AnotherModule,
         StateMachineModule.forFeature({
@@ -112,16 +115,13 @@ describe('StateMachineModule', () => {
         }),
       ],
     }).compile();
-
-    app = moduleFixture.createNestApplication();
-    await app.init();
   });
 
   describe('transition', () => {
     let guard: TestSuccessTransition;
 
     beforeAll(() => {
-      guard = app.get(TestSuccessTransition);
+      guard = module.get(TestSuccessTransition);
     });
 
     afterEach(() => {
@@ -129,7 +129,7 @@ describe('StateMachineModule', () => {
     });
 
     it('Must fail when no transition path is found', (done) => {
-      const service = app.get(StateMachineService<TestEntity, 'status'>);
+      const service = module.get(StateMachineService<TestEntity, 'status'>);
       const entity = { status: 'fulfilled' } as any;
       service
         .transition(entity, 'pending')
@@ -144,7 +144,7 @@ describe('StateMachineModule', () => {
     });
 
     it('Must call all the guards registered for all transitions present between the current state and the desired state ', (done) => {
-      const service = app.get(StateMachineService<TestEntity, 'status'>);
+      const service = module.get(StateMachineService<TestEntity, 'status'>);
       service
         .transition({ status: 'pending' }, 'fulfilled')
         .subscribe((data) => {
@@ -155,7 +155,7 @@ describe('StateMachineModule', () => {
     });
 
     it('Must return the object if no guard is registered', (done) => {
-      const service = app.get(StateMachineService<TestEntity, 'status'>);
+      const service = module.get(StateMachineService<TestEntity, 'status'>);
       service
         .transition({ status: 'synchronized' }, 'fulfilled')
         .subscribe((data) => {
@@ -166,7 +166,7 @@ describe('StateMachineModule', () => {
     });
 
     it('Must return the object with the state updated if the guard checks succeeds', (done) => {
-      const service = app.get(StateMachineService<TestEntity, 'status'>);
+      const service = module.get(StateMachineService<TestEntity, 'status'>);
       service
         .transition({ status: 'pending' }, 'fulfilled')
         .subscribe((data) => {
@@ -177,7 +177,7 @@ describe('StateMachineModule', () => {
     });
 
     it('Must return the object with no changes in state if the guard fails', (done) => {
-      const service = app.get(StateMachineService<TestEntity, 'status'>);
+      const service = module.get(StateMachineService<TestEntity, 'status'>);
       const entity = { status: 'failed' };
       service
         .transition(entity as any, 'fulfilled')
@@ -194,7 +194,7 @@ describe('StateMachineModule', () => {
     let guard: TestSuccessTransition;
 
     beforeAll(() => {
-      guard = app.get(TestSuccessTransition);
+      guard = module.get(TestSuccessTransition);
     });
 
     afterEach(() => {
@@ -202,7 +202,7 @@ describe('StateMachineModule', () => {
     });
 
     it('Must move the entity to the next auto transitionable state', (done) => {
-      const service = app.get(StateMachineService<TestEntity, 'status'>);
+      const service = module.get(StateMachineService<TestEntity, 'status'>);
       service.next({ status: 'pending' }).subscribe((data) => {
         expect(data.status).toBe('processed');
         done();
@@ -210,7 +210,7 @@ describe('StateMachineModule', () => {
     });
 
     it('Must fail if the entity is in a final state', (done) => {
-      const service = app.get(StateMachineService<TestEntity, 'status'>);
+      const service = module.get(StateMachineService<TestEntity, 'status'>);
       service
         .next({ status: 'fulfilled' })
         .pipe(catchError((e) => of(e)))
@@ -218,6 +218,87 @@ describe('StateMachineModule', () => {
           expect(error.message).toBe('Entity is in a final state: fulfilled');
           done();
         });
+    });
+  });
+
+  describe('forFeatureAsync', () => {
+    let asyncModule: TestingModule;
+
+    @Injectable()
+    class GraphConfigService {
+      getGraph(): StateMachineGraphOptions<TestEntity, 'status'> {
+        return {
+          root: TestEntityGraph,
+          manual: ['cancelled', 'failed'],
+          strict: true,
+        };
+      }
+    }
+
+    @Global()
+    @Module({
+      providers: [GraphConfigService],
+      exports: [GraphConfigService],
+    })
+    class ConfigModule {}
+
+    beforeAll(async () => {
+      asyncModule = await Test.createTestingModule({
+        imports: [
+          AnotherModule,
+          ConfigModule,
+          StateMachineModule.forFeatureAsync({
+            entity: TestEntity,
+            field: 'status',
+            guards: [
+              TestSuccessTransition,
+              TestFailTransition,
+              TestTransitionWithInjected,
+            ],
+            inject: [GraphConfigService],
+            useFactory: (configService: GraphConfigService) =>
+              configService.getGraph(),
+          }),
+        ],
+      }).compile();
+    });
+
+    it('Must resolve the service when configured asynchronously', () => {
+      const service = asyncModule.get(
+        StateMachineService<TestEntity, 'status'>,
+      );
+      expect(service).toBeDefined();
+    });
+
+    it('Must transition correctly with async config', (done) => {
+      const service = asyncModule.get(
+        StateMachineService<TestEntity, 'status'>,
+      );
+      service
+        .transition({ status: 'pending' }, 'fulfilled')
+        .subscribe((data) => {
+          expect(data.status).toBe('fulfilled');
+          done();
+        });
+    });
+
+    it('Must work without inject option', async () => {
+      const mod = await Test.createTestingModule({
+        imports: [
+          StateMachineModule.forFeatureAsync({
+            entity: TestEntity,
+            field: 'status',
+            guards: [],
+            useFactory: () => ({
+              root: { state: 'pending' as const, next: ['fulfilled' as const] },
+              strict: false,
+            }),
+          }),
+        ],
+      }).compile();
+
+      const service = mod.get(StateMachineService<TestEntity, 'status'>);
+      expect(service).toBeDefined();
     });
   });
 });
