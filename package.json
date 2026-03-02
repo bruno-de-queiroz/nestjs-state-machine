@@ -1,6 +1,6 @@
 {
   "name": "nestjs-state-machine",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Declarative state machine module for NestJS with transition guards, automatic path finding, and full DI support.",
   "files": [
     "dist/**/*.js",
